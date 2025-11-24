@@ -1,0 +1,20 @@
+{
+  "assets": {
+    "token_1 (2).png": {
+      "path": "C:\\Users\\Mkopy\\Documents\\\u043a\u043e\u0434\\TableTop\\assets\\token_1 (2).png"
+    },
+    "token_1 (2)_1.png": {
+      "path": "c:\\Users\\Mkopy\\Documents\\\u043a\u043e\u0434\\TableTop\\assets\\token_1 (2)_1.png"
+    }
+  },
+  "tokens": [
+    {
+      "id": "904b7e45",
+      "asset": "token_1 (2).png",
+      "x": 855,
+      "y": 138,
+      "rotation": 0,
+      "visible": true
+    }
+  ]
+}
