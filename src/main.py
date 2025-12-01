@@ -273,6 +273,14 @@ def main():
                         ("Rotate CCW 45°", "rotate_ccw"),
                         ("Scale +10%", "scale_up"),
                         ("Scale -10%", "scale_down"),
+                        ("Bring to Front", "z_front"),
+                        ("Send to Back", "z_back"),
+                        ("Layer Up", "z_up"),
+                        ("Layer Down", "z_down"),
+                        ("Group Selected", "group_selected"),
+                        ("Ungroup", "ungroup"),
+                        ("Lock", "lock"),
+                        ("Unlock", "unlock"),
                         ("Delete", "delete"),
                     ]
                     context_menu = ContextMenu(
