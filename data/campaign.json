@@ -1,20 +1,22 @@
 {
   "assets": {
-    "token_1 (2).png": {
-      "path": "C:\\Users\\Mkopy\\Documents\\\u043a\u043e\u0434\\TableTop\\assets\\token_1 (2).png"
-    },
     "token_1 (2)_1.png": {
-      "path": "c:\\Users\\Mkopy\\Documents\\\u043a\u043e\u0434\\TableTop\\assets\\token_1 (2)_1.png"
+      "path": "C:\\Users\\Mkopy\\Documents\\\u043a\u043e\u0434\\TableTop\\assets\\token_1 (2)_1.png"
+    },
+    "token_1 (1).png": {
+      "path": "C:\\Users\\Mkopy\\Documents\\\u043a\u043e\u0434\\TableTop\\assets\\token_1 (1).png"
+    },
+    "token_1.png": {
+      "path": "C:\\Users\\Mkopy\\Documents\\\u043a\u043e\u0434\\TableTop\\assets\\token_1.png"
     }
   },
-  "tokens": [
-    {
-      "id": "904b7e45",
-      "asset": "token_1 (2).png",
-      "x": 855,
-      "y": 138,
-      "rotation": 0,
-      "visible": true
+  "tokens": [],
+  "background": {
+    "path": "C:/Users/Mkopy/Downloads/img_hero_header_background.jpg",
+    "camera": {
+      "x": -689.0689371051913,
+      "y": 418.5333699533096,
+      "zoom": 0.6742592592592592
     }
-  ]
+  }
 }
