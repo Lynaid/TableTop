@@ -3,7 +3,7 @@ import sys
 from assets import AssetManager
 from token import TokenManager
 from ui import Button, ContextMenu, PropertiesWindow, AssetBrowserPanel
-from utils import roll_dice, save_campaign, load_campaign
+from utils import roll_dice, save_campaign, load_campaign, export_token, import_token
 import os
 import tkinter as tk
 from tkinter import filedialog
@@ -62,12 +62,73 @@ def load_background_dialog():
     root.withdraw()
     fp = filedialog.askopenfilename(
         title="Select background image",
-        filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp")]
+        filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp")],
     )
     root.destroy()
     if not fp:
         return None
     return fp
+
+
+def choose_campaign_save_path(data_dir):
+    campaigns_dir = os.path.join(data_dir, "campaigns")
+    os.makedirs(campaigns_dir, exist_ok=True)
+    root = tk.Tk()
+    root.withdraw()
+    path = filedialog.asksaveasfilename(
+        title="Save Campaign",
+        initialdir=campaigns_dir,
+        defaultextension=".json",
+        filetypes=[("Campaign JSON", "*.json")],
+        initialfile="campaign.json",
+    )
+    root.destroy()
+    return path or None
+
+
+def choose_campaign_load_path(data_dir):
+    campaigns_dir = os.path.join(data_dir, "campaigns")
+    os.makedirs(campaigns_dir, exist_ok=True)
+    root = tk.Tk()
+    root.withdraw()
+    path = filedialog.askopenfilename(
+        title="Load Campaign",
+        initialdir=campaigns_dir,
+        filetypes=[("Campaign JSON", "*.json")],
+    )
+    root.destroy()
+    return path or None
+
+
+def choose_token_export_path(data_dir, token_id):
+    tokens_dir = os.path.join(data_dir, "tokens")
+    os.makedirs(tokens_dir, exist_ok=True)
+    root = tk.Tk()
+    root.withdraw()
+    default_name = f"token_{token_id}.json"
+    path = filedialog.asksaveasfilename(
+        title="Export Token",
+        initialdir=tokens_dir,
+        defaultextension=".json",
+        filetypes=[("Token JSON", "*.json")],
+        initialfile=default_name,
+    )
+    root.destroy()
+    return path or None
+
+
+def choose_token_import_path(data_dir):
+    tokens_dir = os.path.join(data_dir, "tokens")
+    os.makedirs(tokens_dir, exist_ok=True)
+    root = tk.Tk()
+    root.withdraw()
+    path = filedialog.askopenfilename(
+        title="Import Token",
+        initialdir=tokens_dir,
+        filetypes=[("Token JSON", "*.json")],
+    )
+    root.destroy()
+    return path or None
 
 
 def fit_camera_to_background(bg_surf, camera):
@@ -123,6 +184,7 @@ def main():
     btn_toggle_snap = Button("Snap: ON" if SNAP_DEFAULT else "Snap: OFF", 710, 10, 100, 32)
     btn_assets_panel = Button("Assets <<", 820, 10, 110, 32)
     btn_load_bg = Button("Load Background", 940, 10, 160, 32)
+    btn_import_token = Button("Import Token", 1110, 10, 140, 32)
 
     show_grid = SHOW_GRID_DEFAULT
     snap_enabled = SNAP_DEFAULT
@@ -267,6 +329,7 @@ def main():
                     board_rect=board_rect,
                 )
                 if cm_action:
+                    token = cm_action["token"]
                     menu_items = [
                         ("Properties", "properties"),
                         ("Rotate CW 45°", "rotate_cw"),
@@ -281,19 +344,21 @@ def main():
                         ("Ungroup", "ungroup"),
                         ("Lock", "lock"),
                         ("Unlock", "unlock"),
+                        ("Export Token...", "export_token"),
                         ("Delete", "delete"),
                     ]
                     context_menu = ContextMenu(
                         menu_items,
                         cm_action["pos"],
-                        cm_action["token"],
+                        token,
                         token_mgr,
                     )
 
             if not event_consumed_by_panel and token_mgr.last_action:
                 action_payload = token_mgr.last_action
                 token_mgr.last_action = None
-                if action_payload.get("action") == "properties":
+                act = action_payload.get("action")
+                if act == "properties":
                     t = action_payload.get("token")
                     properties_window = PropertiesWindow(
                         (200, 80, 560, 460),
@@ -303,6 +368,12 @@ def main():
                         ),
                     )
                     context_menu = None
+                elif act == "export_token":
+                    t = action_payload.get("token")
+                    if t is not None:
+                        path = choose_token_export_path(data_dir, t.id)
+                        if path:
+                            export_token(path, t)
 
             if (
                 event.type == pygame.MOUSEBUTTONDOWN
@@ -327,24 +398,23 @@ def main():
                 elif btn_roll.rect.collidepoint(mx, my):
                     dice_result = roll_dice(20)
                 elif btn_save.rect.collidepoint(mx, my):
-                    path = os.path.join(data_dir, "campaign.json")
-                    bg_state = None
-                    if background_surface and background_path:
-                        bg_state = {
-                            "path": background_path,
-                            "camera": {
-                                "x": camera_x,
-                                "y": camera_y,
-                                "zoom": camera_zoom,
-                            },
-                        }
-                    save_campaign(path, asset_mgr, token_mgr, bg_state)
-                    print("Saved to", path)
+                    path = choose_campaign_save_path(data_dir)
+                    if path:
+                        bg_state = None
+                        if background_surface and background_path:
+                            bg_state = {
+                                "path": background_path,
+                                "camera": {
+                                    "x": camera_x,
+                                    "y": camera_y,
+                                    "zoom": camera_zoom,
+                                },
+                            }
+                        save_campaign(path, asset_mgr, token_mgr, bg_state)
                 elif btn_load.rect.collidepoint(mx, my):
-                    path = os.path.join(data_dir, "campaign.json")
-                    if os.path.exists(path):
+                    path = choose_campaign_load_path(data_dir)
+                    if path:
                         bg_state = load_campaign(path, asset_mgr, token_mgr)
-                        print("Loaded from", path)
                         asset_mgr.refresh_assets()
                         if asset_panel_open:
                             asset_panel._build_categories()
@@ -381,6 +451,10 @@ def main():
                             camera_x, camera_y, camera_zoom = fit_camera_to_background(
                                 background_surface, (camera_x, camera_y, camera_zoom)
                             )
+                elif btn_import_token.rect.collidepoint(mx, my):
+                    tp = choose_token_import_path(data_dir)
+                    if tp:
+                        import_token(tp, asset_mgr, token_mgr)
 
         token_mgr.update(dt)
 
@@ -396,6 +470,7 @@ def main():
         btn_toggle_snap.draw(screen)
         btn_assets_panel.draw(screen)
         btn_load_bg.draw(screen)
+        btn_import_token.draw(screen)
 
         board_rect = pygame.Rect(0, 58, WIDTH, HEIGHT - 58)
         board_surface = screen.subsurface(board_rect)

@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "asset": "token_1 (1).png",
+  "data": {
+    "id": "ec47029f",
+    "asset": "token_1 (1).png",
+    "x": 673.0,
+    "y": 6.0,
+    "rotation": 0,
+    "scale": 1.0,
+    "visible": true,
+    "name": "token_1 (1).png",
+    "hp": 5,
+    "max_hp": 5,
+    "notes": "",
+    "gm_only_notes": false,
+    "tint": [
+      255,
+      255,
+      255
+    ],
+    "border_style": "none",
+    "locked": false,
+    "group_id": null,
+    "z_index": 1
+  }
+}

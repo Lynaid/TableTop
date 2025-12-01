@@ -1,76 +1,36 @@
 import os
-from PIL import Image
 import pygame
 import shutil
 import tkinter as tk
 from tkinter import filedialog
-import json
-import time
+from PIL import Image
+
+
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp")
 
 
 class AssetManager:
+    """
+    Asset manager with thumbnail + metadata caching.
+
+    self.assets[name] = {
+        "path": full_path,
+        "surface": pygame.Surface,
+        "thumb": pygame.Surface (thumbnail),
+        "size": file_size_bytes,
+        "last_modified": mtime_int,
+        "date_added": int_timestamp (first time seen)
+    }
+
+    Thumbnails are only rebuilt when the file changes on disk.
+    """
+
     def __init__(self, assets_dir):
         self.assets_dir = os.path.abspath(assets_dir)
         os.makedirs(self.assets_dir, exist_ok=True)
-        # assets[name] = {
-        #   "path": <absolute file path>,
-        #   "surface": pygame.Surface (full image),
-        #   "thumb": pygame.Surface (cached thumbnail),
-        #   "size": int (bytes),
-        #   "date_added": float (timestamp)
-        # }
         self.assets = {}
-        self.registry_path = os.path.join(self.assets_dir, "registry.json")
-        self._load_registry()
-        # ensure thumbnails for all loaded assets
-        for name in list(self.assets.keys()):
-            self._ensure_thumbnail(name)
-
-    def _load_registry(self):
-        """Load registry.json and reconstruct assets with surfaces.
-
-        Registry stores path, file size and date_added. Thumbnails are
-        not stored on disk; they are (re)generated in memory and cached
-        in self.assets[name]["thumb"].
-        """
-        if os.path.exists(self.registry_path):
-            try:
-                with open(self.registry_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                for name, meta in data.items():
-                    p = meta.get("path")
-                    if p and os.path.exists(p):
-                        surf = self._load_surface(p)
-                        if surf:
-                            try:
-                                size = meta.get("size")
-                                if size is None:
-                                    size = os.path.getsize(p)
-                            except Exception:
-                                size = 0
-                            date_added = meta.get("date_added")
-                            if date_added is None:
-                                date_added = time.time()
-                            self.assets[name] = {
-                                "path": p,
-                                "surface": surf,
-                                "size": size,
-                                "date_added": date_added,
-                            }
-            except Exception:
-                pass
-
-    def _save_registry(self):
-        """Persist registry without thumbnails (only disk info)."""
-        data = {}
-        for name, m in self.assets.items():
-            data[name] = {
-                "path": m["path"],
-                "size": m.get("size", 0),
-                "date_added": m.get("date_added", time.time()),
-            }
-        with open(self.registry_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        self._placeholder_surface = None
+        self.refresh_assets()
 
     def _load_surface(self, path):
         try:
@@ -83,33 +43,81 @@ class AssetManager:
             print("Failed load surface:", e)
             return None
 
-    def _ensure_thumbnail(self, name, max_size=(96, 96)):
-        """Create and cache thumbnail surface for asset if missing.
-
-        Thumbnails are stored in self.assets[name]["thumb"] as
-        pygame.Surface instances. They are created once per asset
-        or when the underlying full-size surface changes.
-        """
-        meta = self.assets.get(name)
-        if not meta:
-            return
-        if meta.get("thumb") is not None and isinstance(meta.get("thumb"), pygame.Surface):
-            return
-        base = meta.get("surface")
-        if base is None:
-            return
-        w, h = base.get_size()
+    def _make_thumb(self, surface, max_dim=64):
+        w = surface.get_width()
+        h = surface.get_height()
         if w <= 0 or h <= 0:
-            return
-        max_w, max_h = max_size
-        scale = min(1.0, max_w / float(w), max_h / float(h))
-        new_w = max(1, int(w * scale))
-        new_h = max(1, int(h * scale))
+            return None
+        scale = min(max_dim / float(w), max_dim / float(h), 1.0)
+        tw = max(1, int(w * scale))
+        th = max(1, int(h * scale))
         try:
-            thumb = pygame.transform.smoothscale(base, (new_w, new_h))
+            thumb = pygame.transform.smoothscale(surface, (tw, th))
         except Exception:
-            thumb = pygame.transform.scale(base, (new_w, new_h))
-        meta["thumb"] = thumb
+            thumb = pygame.transform.scale(surface, (tw, th))
+        return thumb
+
+    def refresh_assets(self):
+        """
+        Rescan the assets directory (including subfolders) and rebuild metadata.
+        Existing cached surfaces/thumbnails are reused if file path + mtime match.
+        """
+        old = self.assets
+        new_assets = {}
+
+        for root, _, files in os.walk(self.assets_dir):
+            for fn in files:
+                if not fn.lower().endswith(IMAGE_EXTS):
+                    continue
+                full = os.path.join(root, fn)
+                rel = os.path.relpath(full, self.assets_dir)
+                name = rel.replace("\\", "/")
+
+                try:
+                    mtime = int(os.path.getmtime(full))
+                    size = os.path.getsize(full)
+                except OSError:
+                    continue
+
+                prev = old.get(name)
+                if (
+                    prev
+                    and prev.get("path") == full
+                    and prev.get("last_modified") == mtime
+                    and "surface" in prev
+                    and "thumb" in prev
+                ):
+                    new_assets[name] = prev
+                    continue
+
+                surf = self._load_surface(full)
+                if not surf:
+                    continue
+                thumb = self._make_thumb(surf)
+                new_assets[name] = {
+                    "path": full,
+                    "surface": surf,
+                    "thumb": thumb,
+                    "size": size,
+                    "last_modified": mtime,
+                    "date_added": prev.get("date_added", mtime) if prev else mtime,
+                }
+
+        self.assets = new_assets
+
+    def get_categories(self):
+        """
+        Return a sorted list of top-level subfolder names under assets_dir
+        present in current assets.
+        """
+        cats = set()
+        for meta in self.assets.values():
+            rel = os.path.relpath(meta["path"], self.assets_dir)
+            rel_dir = os.path.dirname(rel)
+            if rel_dir and rel_dir != ".":
+                top = rel_dir.replace("\\", "/").split("/")[0]
+                cats.add(top)
+        return sorted(cats)
 
     def import_asset_dialog(self):
         root = tk.Tk()
@@ -134,91 +142,65 @@ class AssetManager:
                         break
                     i += 1
             shutil.copy(fp, dest)
-            surf = self._load_surface(dest)
-            if surf:
-                size = 0
-                try:
-                    size = os.path.getsize(dest)
-                except Exception:
-                    pass
-                asset_name = os.path.basename(dest)
-                self.assets[asset_name] = {
-                    "path": dest,
-                    "surface": surf,
-                    "size": size,
-                    "date_added": time.time(),
-                }
-                self._ensure_thumbnail(asset_name)
-                self._save_registry()
-                print("Imported", dest)
-                return dest
+            self.refresh_assets()
+            print("Imported", dest)
+            return dest
         except Exception as e:
             print("Import failed:", e)
             return None
 
-    def refresh_assets(self):
-        """Rescan assets_dir for image files and update asset list.
-
-        - New files are added.
-        - Removed files are dropped.
-        - Existing entries update size/path if needed.
-        - Thumbnails are cached in self.assets[name]["thumb"] and
-          are not recreated every frame.
+    def ensure_placeholder_asset(self):
         """
-        exts = (".png", ".jpg", ".jpeg", ".bmp")
-        seen_names = set()
-
-        for root_dir, _, files in os.walk(self.assets_dir):
-            for fname in files:
-                if not fname.lower().endswith(exts):
-                    continue
-                path = os.path.join(root_dir, fname)
-                seen_names.add(fname)
-                size = 0
-                try:
-                    size = os.path.getsize(path)
-                except Exception:
-                    pass
-
-                if fname in self.assets:
-                    meta = self.assets[fname]
-                    meta["path"] = path
-                    meta["size"] = size
-                    if "date_added" not in meta:
-                        meta["date_added"] = time.time()
-                    if meta.get("surface") is None:
-                        surf = self._load_surface(path)
-                        if surf:
-                            meta["surface"] = surf
-                            meta["thumb"] = None
-                    self._ensure_thumbnail(fname)
-                else:
-                    surf = self._load_surface(path)
-                    if surf:
-                        self.assets[fname] = {
-                            "path": path,
-                            "surface": surf,
-                            "size": size,
-                            "date_added": time.time(),
-                        }
-                        self._ensure_thumbnail(fname)
-
-        # remove entries for files no longer on disk
-        to_remove = [name for name in self.assets.keys() if name not in seen_names]
-        for name in to_remove:
-            self.assets.pop(name, None)
-
-        self._save_registry()
-
-    def get_categories(self):
-        """Return list of category names based on subfolders under assets_dir."""
-        cats = set()
-        for meta in self.assets.values():
+        Ensure a global "__missing__" asset exists and return its surface.
+        Used when campaign/token references assets that do not exist.
+        """
+        if self._placeholder_surface is None:
+            surf = pygame.Surface((72, 72), pygame.SRCALPHA)
+            surf.fill((180, 0, 0))
             try:
-                rel = os.path.relpath(meta["path"], self.assets_dir)
-                parts = rel.split(os.sep)
-                if len(parts) > 1:
-                    cats.add(parts[0])
+                font = pygame.font.SysFont(None, 18)
+                txt = font.render("MISSING", True, (255, 255, 255))
+                tx = (surf.get_width() - txt.get_width()) // 2
+                ty = (surf.get_height() - txt.get_height()) // 2
+                surf.blit(txt, (tx, ty))
             except Exception:
-                continue
-        return sorted(cats)
+                pass
+            self._placeholder_surface = surf
+            self.assets["__missing__"] = {
+                "path": "",
+                "surface": self._placeholder_surface,
+                "thumb": self._make_thumb(self._placeholder_surface),
+                "size": 0,
+                "last_modified": 0,
+                "date_added": 0,
+            }
+        return self._placeholder_surface
+
+    def load_or_get_asset(self, name, path):
+        """
+        Ensure an asset 'name' for 'path' is loaded and registered.
+        Returns surface or None.
+        """
+        meta = self.assets.get(name)
+        if meta and meta.get("path") == path and "surface" in meta:
+            return meta["surface"]
+
+        surf = self._load_surface(path)
+        if not surf:
+            return None
+        thumb = self._make_thumb(surf)
+        try:
+            mtime = int(os.path.getmtime(path))
+            size = os.path.getsize(path)
+        except OSError:
+            mtime = 0
+            size = 0
+        self.assets[name] = {
+            "path": path,
+            "surface": surf,
+            "thumb": thumb,
+            "size": size,
+            "last_modified": mtime,
+            "date_added": mtime,
+        }
+        return surf

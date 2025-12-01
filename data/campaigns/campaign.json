@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "metadata": {
+    "campaign_name": "campaign",
+    "saved_at": "2025-12-01T12:59:58",
+    "engine_version": "0.6"
+  },
+  "assets": {
+    "token_1 (1).png": {
+      "path": "C:\\Users\\Mkopy\\Documents\\код\\TableTop\\assets\\token_1 (1).png",
+      "checksum": "sha256:0c5542097ac4abaf31d5ee4d25e307f2dca54a6d0091ae6223dc4b007b911a6a",
+      "last_modified": 1763988139
+    },
+    "token_1 (2)_1.png": {
+      "path": "C:\\Users\\Mkopy\\Documents\\код\\TableTop\\assets\\token_1 (2)_1.png",
+      "checksum": "sha256:82f8da60d903918b4e4f47d1eec16c2bc45b9fd290211bb0da1a97b4e4376ea5",
+      "last_modified": 1763989181
+    },
+    "token_1.png": {
+      "path": "C:\\Users\\Mkopy\\Documents\\код\\TableTop\\assets\\token_1.png",
+      "checksum": "sha256:efec3c3df44243cada827842f5a0cc238f6dae1cc48dbc10288e5c469cf03b9b",
+      "last_modified": 1763988149
+    }
+  },
+  "tokens": [
+    {
+      "id": "24dbcd42",
+      "asset": "token_1 (1).png",
+      "x": 1088,
+      "y": 320,
+      "rotation": 0,
+      "scale": 1.0,
+      "visible": true,
+      "name": "token_1 (1).png",
+      "hp": 4,
+      "max_hp": 5,
+      "notes": "",
+      "gm_only_notes": false,
+      "tint": [
+        129,
+        255,
+        255
+      ],
+      "border_style": "none",
+      "locked": false,
+      "group_id": null,
+      "z_index": 1
+    }
+  ],
+  "background": {
+    "path": "C:/Users/Mkopy/Downloads/img_hero_header_background.jpg",
+    "camera": {
+      "x": -84.10876132930525,
+      "y": 0.0,
+      "zoom": 0.6129629629629629
+    }
+  }
+}
