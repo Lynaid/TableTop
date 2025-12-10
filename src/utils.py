@@ -25,11 +25,22 @@ def _sha256_of_file(path):
     return "sha256:" + h.hexdigest()
 
 
-def save_campaign(path, asset_mgr, token_mgr, background_state=None, engine_version="0.6"):
+def save_campaign(
+    path,
+    asset_mgr,
+    token_mgr,
+    background_state=None,
+    tilemap=None,
+    engine_version="0.6",
+    rules_engine=None,
+):
     """
     Save full campaign (version 2) to JSON.
+
     path: full path to .json chosen via OS dialog.
     background_state: optional dict with keys "path" and "camera".
+    tilemap: optional TileMap instance.
+    rules_engine: optional RulesEngine instance (for global scripts).
     """
     if not path:
         return
@@ -37,6 +48,7 @@ def save_campaign(path, asset_mgr, token_mgr, background_state=None, engine_vers
     campaign_name = os.path.splitext(os.path.basename(path))[0]
     saved_at = datetime.utcnow().isoformat(timespec="seconds")
 
+    # assets block with checksum + mtime
     assets_block = {}
     for name, meta in asset_mgr.assets.items():
         apath = meta.get("path", "")
@@ -51,6 +63,7 @@ def save_campaign(path, asset_mgr, token_mgr, background_state=None, engine_vers
             "last_modified": mtime,
         }
 
+    # tokens
     tokens_raw = token_mgr.to_json()
     tokens_block = []
     for d in tokens_raw:
@@ -79,6 +92,8 @@ def save_campaign(path, asset_mgr, token_mgr, background_state=None, engine_vers
         "assets": assets_block,
         "tokens": tokens_block,
         "background": None,
+        "tilemap": None,
+        "rules": None,
     }
 
     if background_state:
@@ -93,6 +108,12 @@ def save_campaign(path, asset_mgr, token_mgr, background_state=None, engine_vers
             },
         }
 
+    if tilemap is not None:
+        data["tilemap"] = tilemap.to_json()
+
+    if rules_engine is not None:
+        data["rules"] = rules_engine.to_json()
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -100,9 +121,15 @@ def save_campaign(path, asset_mgr, token_mgr, background_state=None, engine_vers
     print(f"[INFO] Saved campaign: {os.path.basename(path)}")
 
 
-def load_campaign(path, asset_mgr, token_mgr):
+def load_campaign(path, asset_mgr, token_mgr, tilemap=None, rules_engine=None):
     """
     Load campaign (v1 or v2) from JSON.
+
+    tilemap: optional TileMap instance; if provided and JSON contains "tilemap",
+             tilemap.load_from_json(...) is called.
+
+    rules_engine: optional RulesEngine instance; if provided and JSON contains "rules",
+                  rules_engine.load_from_json(...) is called.
 
     Returns background_state or None:
     {
@@ -127,31 +154,32 @@ def load_campaign(path, asset_mgr, token_mgr):
     assets_block = data.get("assets", {})
     placeholder_surf = asset_mgr.ensure_placeholder_asset()
 
-    for name, info in assets_block.items():
-        apath = info.get("path", "")
-        if not apath or not os.path.exists(apath):
-            print(f"[ERROR] Missing asset: {apath or name}")
-            # map this asset name to placeholder
-            asset_mgr.assets[name] = asset_mgr.assets.get(
-                "__missing__", {
-                    "path": "",
-                    "surface": placeholder_surf,
-                    "thumb": None,
-                    "size": 0,
-                    "last_modified": 0,
-                    "date_added": 0,
-                }
-            )
-            continue
+    if isinstance(assets_block, dict):
+        for name, info in assets_block.items():
+            apath = info.get("path", "")
+            if not apath or not os.path.exists(apath):
+                print(f"[ERROR] Missing asset: {apath or name}")
+                asset_mgr.assets[name] = asset_mgr.assets.get(
+                    "__missing__",
+                    {
+                        "path": "",
+                        "surface": placeholder_surf,
+                        "thumb": None,
+                        "size": 0,
+                        "last_modified": 0,
+                        "date_added": 0,
+                    },
+                )
+                continue
 
-        expected = info.get("checksum")
-        current = _sha256_of_file(apath)
-        if expected and current and expected != current:
-            print(f"[WARNING] Asset checksum mismatch: {name}")
+            expected = info.get("checksum")
+            current = _sha256_of_file(apath)
+            if expected and current and expected != current:
+                print(f"[WARNING] Asset checksum mismatch: {name}")
 
-        asset_mgr.load_or_get_asset(name, apath)
+            asset_mgr.load_or_get_asset(name, apath)
 
-    # For version 1, also ensure any referenced assets are present in asset manager
+    # For version 1, also ensure any referenced assets are present
     if version == 1:
         for name, m in data.get("assets", {}).items():
             apath = m.get("path")
@@ -164,28 +192,39 @@ def load_campaign(path, asset_mgr, token_mgr):
     # --- TOKENS BLOCK ---
     tokens_raw = data.get("tokens", [])
     fixed_tokens = []
-    for idx, td in enumerate(tokens_raw):
-        if not isinstance(td, dict):
-            continue
-        t = dict(td)
-        if "asset" not in t:
-            print(f"[ERROR] Missing key tokens[{idx}]/asset – using placeholder")
-            t["asset"] = "__missing__"
+    if isinstance(tokens_raw, list):
+        for idx, td in enumerate(tokens_raw):
+            if not isinstance(td, dict):
+                continue
+            t = dict(td)
+            if "asset" not in t:
+                print(f"[ERROR] Missing key tokens[{idx}]/asset – using placeholder")
+                t["asset"] = "__missing__"
 
-        tint = t.get("tint")
-        if isinstance(tint, (list, tuple)) and len(tint) == 3:
-            vals = list(tint)
-            if any(v is not None and v > 1.0 for v in vals):
-                new_vals = []
-                for v in vals:
-                    if v is None:
-                        new_vals.append(1.0)
-                    else:
-                        new_vals.append(max(0.0, min(1.0, v / 255.0)))
-                t["tint"] = new_vals
-        fixed_tokens.append(t)
+            tint = t.get("tint")
+            if isinstance(tint, (list, tuple)) and len(tint) == 3:
+                vals = list(tint)
+                if any(v is not None and v > 1.0 for v in vals):
+                    new_vals = []
+                    for v in vals:
+                        if v is None:
+                            new_vals.append(1.0)
+                        else:
+                            new_vals.append(max(0.0, min(1.0, v / 255.0)))
+                    t["tint"] = new_vals
+            fixed_tokens.append(t)
 
     token_mgr.load_from_json(fixed_tokens)
+
+    # --- TILEMAP BLOCK ---
+    tilemap_state = data.get("tilemap")
+    if tilemap is not None:
+        tilemap.load_from_json(tilemap_state)
+
+    # --- RULES BLOCK ---
+    rules_state = data.get("rules")
+    if rules_engine is not None and isinstance(rules_state, dict):
+        rules_engine.load_from_json(rules_state)
 
     # --- BACKGROUND STATE ---
     bg_state = None

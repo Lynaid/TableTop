@@ -1,7 +1,5 @@
 import pygame
 import uuid
-import json
-import math
 
 
 class Token:
@@ -24,6 +22,8 @@ class Token:
         self.offset_y = 0.0
         self.preview_x = None
         self.preview_y = None
+        self.drag_start_x = float(self.x)
+        self.drag_start_y = float(self.y)
 
         # visibility / transform
         self.visible = True
@@ -50,6 +50,9 @@ class Token:
         # z-order
         self.z_index = 0
 
+        # scripts per event_type, e.g. "onMove", "onRightClick", "onTurn", etc.
+        self.scripts = {}
+
     # -----------------------------------------------------------
     # INTERNAL HELPERS
     # -----------------------------------------------------------
@@ -66,7 +69,7 @@ class Token:
             new_h = max(1, int(self.original_surface.get_height() * self.scale))
             try:
                 surf = pygame.transform.smoothscale(self.original_surface, (new_w, new_h))
-            except:
+            except Exception:
                 surf = pygame.transform.scale(self.original_surface, (new_w, new_h))
 
         # rotate
@@ -83,7 +86,7 @@ class Token:
             tint_surf.fill((r, g, b, 255))
             arr.blit(tint_surf, (0, 0), special_flags=pygame.BLEND_MULT)
             surf = arr
-        except:
+        except Exception:
             pass
 
         self.surface = surf
@@ -110,17 +113,15 @@ class Token:
         wx = self.preview_x if self.preview_x is not None else self.x
         wy = self.preview_y if self.preview_y is not None else self.y
 
-        # screen space
         sx = (wx - camera_x) * camera_zoom + board_rect.x
         sy = (wy - camera_y) * camera_zoom + board_rect.y
 
-        # scaled
         try:
             tmp = pygame.transform.smoothscale(
                 self.surface,
                 (int(self.w * camera_zoom), int(self.h * camera_zoom)),
             )
-        except:
+        except Exception:
             tmp = pygame.transform.scale(
                 self.surface,
                 (max(1, int(self.w * camera_zoom)), max(1, int(self.h * camera_zoom))),
@@ -167,16 +168,14 @@ class Token:
         elif self.border_style == "dotted":
             r = self._world_to_screen_rect(camera_x, camera_y, camera_zoom, board_rect)
             step = 6
-            # top/bottom
             for x in range(r.x, r.x + r.w, step):
                 surf.fill((200, 200, 200), (x, r.y, 2, 2))
                 surf.fill((200, 200, 200), (x, r.y + r.h - 2, 2, 2))
-            # left/right
             for y in range(r.y, r.y + r.h, step):
                 surf.fill((200, 200, 200), (r.x, y, 2, 2))
                 surf.fill((200, 200, 200), (r.x + r.w - 2, y, 2, 2))
 
-        # selection box
+        # selection
         if selected:
             r = self._world_to_screen_rect(camera_x, camera_y, camera_zoom, board_rect)
             pygame.draw.rect(surf, (255, 255, 0), r.inflate(4, 4), 2)
@@ -201,7 +200,7 @@ class Token:
                 self.surface,
                 (int(self.w * camera_zoom), int(self.h * camera_zoom)),
             )
-        except:
+        except Exception:
             img = pygame.transform.scale(
                 self.surface,
                 (max(1, int(self.w * camera_zoom)), max(1, int(self.h * camera_zoom))),
@@ -210,7 +209,7 @@ class Token:
         img = img.copy()
         try:
             img.fill((255, 255, 255, 160), special_flags=pygame.BLEND_RGBA_MULT)
-        except:
+        except Exception:
             pass
 
         surf.blit(img, (int(sx), int(sy)))
@@ -238,6 +237,7 @@ class Token:
             "locked": self.locked,
             "group_id": self.group_id,
             "z_index": self.z_index,
+            "scripts": dict(self.scripts),
         }
 
     @staticmethod
@@ -272,14 +272,11 @@ class Token:
         t.locked = d.get("locked", False)
         t.group_id = d.get("group_id", None)
         t.z_index = d.get("z_index", 0)
+        t.scripts = dict(d.get("scripts", {}))
 
         t.update_transformed_surface()
         return t
 
-
-# =====================================================================
-# TOKEN MANAGER
-# =====================================================================
 
 class TokenManager:
     def __init__(self, asset_manager):
@@ -292,6 +289,9 @@ class TokenManager:
         self.selection_dragging = False
         self.selection_start_world = (0.0, 0.0)
         self.selection_end_world = (0.0, 0.0)
+
+        # move events (for rule engine)
+        self.pending_move_events = []
 
     # -----------------------------------------------------------
     # APPLY PROPERTIES (from PropertiesWindow)
@@ -362,7 +362,7 @@ class TokenManager:
     # -----------------------------------------------------------
 
     def _pick_token_at_world(self, wx, wy):
-        for t in self._tokens_sorted_by_z(reverse=True):  # top-down
+        for t in self._tokens_sorted_by_z(reverse=True):
             if not t.visible:
                 continue
 
@@ -373,7 +373,7 @@ class TokenManager:
 
             try:
                 col = t.surface.get_at((lx, ly))
-            except:
+            except Exception:
                 continue
 
             if len(col) == 4 and col[3] > 0:
@@ -430,7 +430,6 @@ class TokenManager:
             for t in self._tokens_in_group(gid):
                 t.group_id = None
         else:
-            # ungroup selection
             for t in self.selected_tokens:
                 t.group_id = None
 
@@ -512,9 +511,6 @@ class TokenManager:
 
         ctrl = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
 
-        # ---------------------------
-        # LEFT DOWN
-        # ---------------------------
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if not board_rect.collidepoint(event.pos):
                 return None
@@ -531,13 +527,11 @@ class TokenManager:
                 if not self._is_selected(t):
                     self._set_single_selection(t)
             else:
-                # begin rectangle selection
                 self.selection_dragging = True
                 self.selection_start_world = (wx, wy)
                 self.selection_end_world = (wx, wy)
                 return None
 
-            # start dragging (grouped or multi)
             if not t.locked:
                 if t.group_id:
                     drag_set = [x for x in self._tokens_in_group(t.group_id) if not x.locked]
@@ -552,12 +546,11 @@ class TokenManager:
                     u.offset_y = wy - u.y
                     u.preview_x = u.x
                     u.preview_y = u.y
+                    u.drag_start_x = u.x
+                    u.drag_start_y = u.y
 
             return None
 
-        # ---------------------------
-        # LEFT UP
-        # ---------------------------
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             if self.selection_dragging:
                 wx, wy = to_world(event.pos)
@@ -570,24 +563,39 @@ class TokenManager:
                 )
                 self.selection_dragging = False
 
-            # drop dragged tokens
+            # drop dragged tokens and queue onMove events
             for t in self.tokens:
                 if t.dragging:
+                    from_x = t.drag_start_x
+                    from_y = t.drag_start_y
+
                     t.dragging = False
                     if snap_enabled:
                         if t.preview_x is not None:
                             t.x = t.preview_x
                             t.y = t.preview_y
                         else:
-                            t.snap_to_grid(grid_size)
+                            self._snap_token_to_grid(t, grid_size)
+                    else:
+                        if t.preview_x is not None:
+                            t.x = t.preview_x
+                            t.y = t.preview_y
+
                     t.preview_x = None
                     t.preview_y = None
 
+                    if from_x != t.x or from_y != t.y:
+                        self.pending_move_events.append(
+                            {
+                                "type": "onMove",
+                                "token": t,
+                                "from": (from_x, from_y),
+                                "to": (t.x, t.y),
+                            }
+                        )
+
             return None
 
-        # ---------------------------
-        # MOUSE MOVE
-        # ---------------------------
         if event.type == pygame.MOUSEMOTION:
             wx, wy = to_world(event.pos)
 
@@ -595,7 +603,6 @@ class TokenManager:
                 self.selection_end_world = (wx, wy)
                 return None
 
-            # drag tokens
             for t in self.tokens:
                 if t.dragging:
                     nx = wx - t.offset_x
@@ -612,9 +619,6 @@ class TokenManager:
 
             return None
 
-        # ---------------------------
-        # RIGHT CLICK = CONTEXT MENU
-        # ---------------------------
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             if not board_rect.collidepoint(event.pos):
                 return None
@@ -627,6 +631,13 @@ class TokenManager:
                 return {"token": t, "pos": event.pos}
 
         return None
+
+    def _snap_token_to_grid(self, token, grid_size):
+        if grid_size <= 0:
+            return
+        nx = round(token.x / grid_size) * grid_size
+        ny = round(token.y / grid_size) * grid_size
+        token.x, token.y = nx, ny
 
     # -----------------------------------------------------------
     # CONTEXT MENU ACTIONS
@@ -706,7 +717,6 @@ class TokenManager:
         grid_size,
         show_snap_preview,
     ):
-        # sorted bottom-to-top
         for t in self._tokens_sorted_by_z():
             if t.dragging and show_snap_preview and t.preview_x is not None:
                 t.draw_preview(screen, camera_x, camera_y, camera_zoom, board_rect)
@@ -720,7 +730,6 @@ class TokenManager:
                     selected=self._is_selected(t),
                 )
 
-        # selection rectangle
         if self.selection_dragging:
             x1, y1 = self.selection_start_world
             x2, y2 = self.selection_end_world
@@ -749,6 +758,7 @@ class TokenManager:
         self.tokens = []
         self.selected_tokens = []
         self.selection_dragging = False
+        self.pending_move_events = []
 
         lookup = {n: m["surface"] for n, m in self.asset_manager.assets.items()}
 
