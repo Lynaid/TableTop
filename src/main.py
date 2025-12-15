@@ -21,7 +21,7 @@ import json
 import queue
 import uuid
 
-WIDTH, HEIGHT = 1920, 1080
+WIDTH, HEIGHT = 1280, 720
 FPS = 60
 
 GRID_SIZE = 64
